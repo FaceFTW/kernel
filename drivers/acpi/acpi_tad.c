@@ -473,6 +473,14 @@ static ssize_t caps_show(struct device *dev, struct device_attribute *attr,
 
 static DEVICE_ATTR_RO(caps);
 
+static struct attribute *acpi_tad_attrs[] = {
+	&dev_attr_caps.attr,
+	NULL,
+};
+static const struct attribute_group acpi_tad_attr_group = {
+	.attrs	= acpi_tad_attrs,
+};
+
 static ssize_t ac_alarm_store(struct device *dev, struct device_attribute *attr,
 			      const char *buf, size_t count)
 {
@@ -520,6 +528,16 @@ static ssize_t ac_status_show(struct device *dev, struct device_attribute *attr,
 }
 
 static DEVICE_ATTR_RW(ac_status);
+
+static struct attribute *acpi_tad_ac_attrs[] = {
+	&dev_attr_ac_alarm.attr,
+	&dev_attr_ac_policy.attr,
+	&dev_attr_ac_status.attr,
+	NULL,
+};
+static const struct attribute_group acpi_tad_ac_attr_group = {
+	.attrs	= acpi_tad_ac_attrs,
+};
 
 static ssize_t dc_alarm_store(struct device *dev, struct device_attribute *attr,
 			      const char *buf, size_t count)
@@ -797,6 +815,17 @@ static void acpi_tad_remove(void *data)
 
 	device_init_wakeup(dev, false);
 
+	if (dd->capabilities & ACPI_TAD_RT)
+		sysfs_remove_group(&dev->kobj, &acpi_tad_time_attr_group);
+
+	if (dd->capabilities & ACPI_TAD_AC_WAKE)
+		sysfs_remove_group(&dev->kobj, &acpi_tad_ac_attr_group);
+
+	if (dd->capabilities & ACPI_TAD_DC_WAKE)
+		sysfs_remove_group(&dev->kobj, &acpi_tad_dc_attr_group);
+
+	sysfs_remove_group(&dev->kobj, &acpi_tad_attr_group);
+
 	scoped_guard(pm_runtime_noresume, dev) {
 		if (dd->capabilities & ACPI_TAD_AC_WAKE) {
 			acpi_tad_disable_timer(dev, ACPI_TAD_AC_TIMER);
@@ -835,14 +864,6 @@ static int acpi_tad_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	if (!acpi_has_method(handle, "_PRW")) {
-		dev_info(dev, "Missing _PRW\n");
-		caps &= ~(ACPI_TAD_AC_WAKE | ACPI_TAD_DC_WAKE);
-	}
-
-	if (!(caps & ACPI_TAD_AC_WAKE))
-		caps &= ~ACPI_TAD_DC_WAKE;
-
 	dd = devm_kzalloc(dev, sizeof(*dd), GFP_KERNEL);
 	if (!dd)
 		return -ENOMEM;
@@ -878,8 +899,23 @@ static int acpi_tad_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	if (caps & ACPI_TAD_RT)
-		acpi_tad_register_rtc(dev, caps);
+	if (caps & ACPI_TAD_AC_WAKE) {
+		ret = sysfs_create_group(&dev->kobj, &acpi_tad_ac_attr_group);
+		if (ret)
+			goto fail;
+	}
+
+	if (caps & ACPI_TAD_DC_WAKE) {
+		ret = sysfs_create_group(&dev->kobj, &acpi_tad_dc_attr_group);
+		if (ret)
+			goto fail;
+	}
+
+	if (caps & ACPI_TAD_RT) {
+		ret = sysfs_create_group(&dev->kobj, &acpi_tad_time_attr_group);
+		if (ret)
+			goto fail;
+	}
 
 	return 0;
 }
